@@ -14,6 +14,7 @@ $cfg['Servers'][$i]['auth_type'] = 'config';
 
 /* Server parameters */
 $cfg['Servers'][$i]['host'] = $env["MYSQL_HOST"] ?? 'mysql';
+$cfg['Servers'][$i]['port'] = $env["MYSQL_PORT"] ?? 3306;
 $cfg['Servers'][$i]['compress'] = false;
 $cfg['Servers'][$i]['AllowNoPassword'] = false;
 $cfg['Servers'][$i]['user'] = $env["MYSQL_USER"] ?? "root";

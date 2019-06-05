@@ -1,0 +1,201 @@
+apiVersion: v1
+kind: Template
+metadata:
+  name: PhpMyAdmin
+  annotations:
+    description: Deploy PhpMyAdmin to access your mysql database
+    tags: "database,mysql,mariadb"
+    iconClass: "icon-mysql-database"
+
+parameters:
+- name: NAME
+  displayName: Name
+  description: Deployment Name
+  value: phpmyadmin
+  required: true
+- name: MYSQL_HOST
+  displayName: Hostname
+  description: Hostname to connect to. Should be a kubernetes service name
+  value: mysql
+  required: true
+- name: MYSQL_PORT
+  displayName: Port
+  description: MySQL server port
+  value: "3306"
+  required: true
+- name: MYSQL_USER
+  displayName: Username
+  description: Username to authenticate 
+  value: root
+  required: true
+- name: MYSQL_PASSWORD
+  displayName: Password
+  description: Passwort to authenticate
+  required: true
+- name: OAUTH_COOKIE_SECRET
+  displayName: Cookie Secret
+  description: Fill in random string
+  from: '[a-zA-Z0-9]{16}'
+  generate: expression
+  required: true
+
+objects:
+- apiVersion: v1
+  kind: Secret
+  metadata:
+    name: ${NAME}
+    labels:
+      app: ${NAME}
+  stringData:
+    hostname: ${MYSQL_HOST}
+    port: ${MYSQL_PORT}
+    username: ${MYSQL_USER}
+    password: ${MYSQL_PASSWORD}
+- apiVersion: v1
+  kind: ServiceAccount
+  metadata:
+    labels:
+      app: ${NAME}
+    name: ${NAME}
+    annotations:
+      serviceaccounts.openshift.io/oauth-redirectreference.primary: '{"kind":"OAuthRedirectReference","apiVersion":"v1","reference":{"kind":"Route","name":"${NAME}"}}'
+  secrets:
+    - name: ${NAME}
+- apiVersion: v1
+  kind: Service
+  metadata:
+    annotations:
+      service.alpha.openshift.io/serving-cert-secret-name: ${NAME}-tls
+    name: ${NAME}
+    labels:
+      app: ${NAME}
+  spec:
+    ports:
+      - name: https
+        protocol: TCP
+        port: 443
+        targetPort: 8443
+    selector:
+      app: ${NAME}
+- apiVersion: v1
+  kind: Route
+  metadata:
+    name: ${NAME}
+    labels:
+      app: ${NAME}
+  spec:
+    port:
+      targetPort: https
+    to:
+      kind: Service
+      name: ${NAME}
+    tls:
+      termination: Reencrypt
+- apiVersion: v1
+  kind: DeploymentConfig
+  metadata:
+    name: ${NAME}
+    labels:
+      app: ${NAME}
+  spec:
+    replicas: 1
+    selector:
+      app: ${NAME}
+    strategy:
+      type: Rolling
+    template:
+      metadata:
+        labels:
+          app: ${NAME}
+      spec:
+        containers:
+          - name: phpmyadmin
+            env:
+            - name: MYSQL_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: ${NAME}
+                  key: hostname
+            - name: MYSQL_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: ${NAME}
+                  key: port
+            - name: MYSQL_USER
+              valueFrom:
+                secretKeyRef:
+                  name: ${NAME}
+                  key: username
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ${NAME}
+                  key: password
+            image: lukeelten/openshift-phpmyadmin:latest
+            imagePullPolicy: Always
+            ports:
+              - containerPort: 8080
+                protocol: TCP
+            readinessProbe:
+              failureThreshold: 3
+              httpGet:
+                path: /
+                port: 8080
+                scheme: HTTP
+              initialDelaySeconds: 5
+              periodSeconds: 10
+              successThreshold: 1
+              timeoutSeconds: 2
+            livenessProbe:
+              failureThreshold: 3
+              initialDelaySeconds: 10
+              periodSeconds: 10
+              successThreshold: 1
+              tcpSocket:
+                port: 8080
+              timeoutSeconds: 2
+            
+          - name: oauth-proxy
+            image: openshift/oauth-proxy:latest
+            imagePullPolicy: Always
+            ports:
+              - containerPort: 8443
+                protocol: TCP
+            args:
+              - --https-address=:8443
+              - --provider=openshift
+              - --openshift-service-account=${NAME}
+              - --upstream=http://localhost:8080
+              - --tls-cert=/etc/tls/private/tls.crt
+              - --tls-key=/etc/tls/private/tls.key
+              - --cookie-secret=${OAUTH_COOKIE_SECRET}
+            livenessProbe:
+              failureThreshold: 3
+              initialDelaySeconds: 10
+              periodSeconds: 10
+              successThreshold: 1
+              tcpSocket:
+                port: 8443
+              timeoutSeconds: 2
+            readinessProbe:
+              failureThreshold: 3
+              httpGet:
+                path: /oauth/healthz
+                port: 8443
+                scheme: HTTPS
+              initialDelaySeconds: 5
+              periodSeconds: 10
+              successThreshold: 1
+              timeoutSeconds: 2
+            volumeMounts:
+              - mountPath: /etc/tls/private
+                name: proxy-tls
+        dnsPolicy: ClusterFirst
+        restartPolicy: Always
+        serviceAccountName: ${NAME}
+        volumes:
+          - name: proxy-tls
+            secret:
+              secretName: ${NAME}-tls
+    triggers:
+      - type: ConfigChange

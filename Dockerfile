@@ -1,22 +1,9 @@
-FROM php:apache
+FROM phpmyadmin/phpmyadmin:latest
 
-LABEL author="Tobias Derksen <tobias.derksen@codecentric.de>"
-ARG PMA_VERSION="STABLE"
+EXPOSE 8080
 
-RUN mkdir -p /tmp/pma && chmod -R 777 /tmp/pma
+RUN sed -i 's/:80/:8080/' /etc/apache2/sites-available/000-default.conf && \
+    sed -i 's/Listen 80/Listen 8080/' /etc/apache2/ports.conf && \
+    sed -i 's/Listen 443/Listen 8443/' /etc/apache2/ports.conf
 
-RUN apt-get update && \
-    apt-get -y install git unzip zip libzip-dev && \
-    docker-php-ext-install mysqli zip && \
-    apt-get clean
-RUN php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');" && \
-    php composer-setup.php && \
-    rm -f composer-setup.php && \
-    mv composer.phar /usr/local/bin/composer
-
-RUN git clone -b "${PMA_VERSION}" --depth 1 https://github.com/phpmyadmin/phpmyadmin.git . && \
-    composer install --no-dev -o -n
-
-COPY config.inc.php .
-COPY apache2.conf /etc/apache2/apache2.conf
-
+USER www-data
